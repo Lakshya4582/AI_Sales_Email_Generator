@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Log in — AI Sales Email Generator</title>
+    <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<main class="app auth-app">
+    <header class="hero">
+        <h1>Welcome back</h1>
+        <p class="subtitle">Log in to generate sales emails.</p>
+    </header>
+
+    <section class="card auth-card">
+        <form id="login-form" autocomplete="on">
+            <div class="field">
+                <label for="email">Email</label>
+                <input id="email" type="email" required autocomplete="email" placeholder="you@company.com" />
+            </div>
+
+            <div class="field">
+                <label for="password">Password</label>
+                <input id="password" type="password" required autocomplete="current-password" placeholder="••••••••" />
+            </div>
+
+            <button type="submit" class="primary" id="submit-btn">
+                <span class="btn-label">Log in</span>
+                <span class="spinner" aria-hidden="true"></span>
+            </button>
+
+            <p id="form-error" class="form-error" hidden></p>
+        </form>
+
+        <p class="auth-switch">
+            Don't have an account? <a href="signup.html">Sign up</a>
+        </p>
+    </section>
+</main>
+
+<script src="config.js"></script>
+<script src="auth.js"></script>
+<script>
+    redirectIfAuthenticated();
+
+    const form = document.getElementById("login-form");
+    const btn = document.getElementById("submit-btn");
+    const errorEl = document.getElementById("form-error");
+
+    form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        errorEl.hidden = true;
+        btn.disabled = true;
+        btn.classList.add("loading");
+        btn.querySelector(".btn-label").textContent = "Logging in";
+
+        try {
+            const response = await fetch(`${API_BASE}/login`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    email: document.getElementById("email").value.trim(),
+                    password: document.getElementById("password").value,
+                }),
+            });
+            const data = await response.json().catch(() => ({}));
+
+            if (!response.ok) {
+                errorEl.textContent = data.detail || `Login failed (${response.status}).`;
+                errorEl.hidden = false;
+                return;
+            }
+
+            setAuth(data.access_token, data.email);
+            window.location.href = "index.html";
+        } catch (err) {
+            errorEl.textContent = `Network error: ${err.message}. Is the backend running?`;
+            errorEl.hidden = false;
+        } finally {
+            btn.disabled = false;
+            btn.classList.remove("loading");
+            btn.querySelector(".btn-label").textContent = "Log in";
+        }
+    });
+</script>
+
+</body>
+</html>

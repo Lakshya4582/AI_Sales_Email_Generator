@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sign up — AI Sales Email Generator</title>
+    <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<main class="app auth-app">
+    <header class="hero">
+        <h1>Create your account</h1>
+        <p class="subtitle">Start generating sales emails in seconds.</p>
+    </header>
+
+    <section class="card auth-card">
+        <form id="signup-form" autocomplete="on">
+            <div class="grid">
+                <div class="field">
+                    <label for="first_name">First name</label>
+                    <input id="first_name" type="text" required autocomplete="given-name" placeholder="Jane" />
+                </div>
+                <div class="field">
+                    <label for="last_name">Last name</label>
+                    <input id="last_name" type="text" required autocomplete="family-name" placeholder="Doe" />
+                </div>
+            </div>
+
+            <div class="field">
+                <label for="email">Work email</label>
+                <input id="email" type="email" required autocomplete="email" placeholder="you@company.com" />
+            </div>
+
+            <div class="field">
+                <label for="password">Password</label>
+                <input id="password" type="password" required autocomplete="new-password" minlength="8" placeholder="At least 8 characters" />
+            </div>
+
+            <div class="grid">
+                <div class="field">
+                    <label for="company">Company <span class="optional">(optional)</span></label>
+                    <input id="company" type="text" autocomplete="organization" placeholder="Acme Inc." />
+                </div>
+                <div class="field">
+                    <label for="role">Role <span class="optional">(optional)</span></label>
+                    <input id="role" type="text" autocomplete="organization-title" placeholder="Sales Manager" />
+                </div>
+            </div>
+
+            <button type="submit" class="primary" id="submit-btn">
+                <span class="btn-label">Create account</span>
+                <span class="spinner" aria-hidden="true"></span>
+            </button>
+
+            <p id="form-error" class="form-error" hidden></p>
+        </form>
+
+        <p class="auth-switch">
+            Already have an account? <a href="login.html">Log in</a>
+        </p>
+    </section>
+</main>
+
+<script src="config.js"></script>
+<script src="auth.js"></script>
+<script>
+    redirectIfAuthenticated();
+
+    const form = document.getElementById("signup-form");
+    const btn = document.getElementById("submit-btn");
+    const errorEl = document.getElementById("form-error");
+
+    form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        errorEl.hidden = true;
+        btn.disabled = true;
+        btn.classList.add("loading");
+        btn.querySelector(".btn-label").textContent = "Creating account";
+
+        try {
+            const response = await fetch(`${API_BASE}/signup`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    email: document.getElementById("email").value.trim(),
+                    password: document.getElementById("password").value,
+                    first_name: document.getElementById("first_name").value.trim(),
+                    last_name: document.getElementById("last_name").value.trim(),
+                    company: document.getElementById("company").value.trim() || null,
+                    role: document.getElementById("role").value.trim() || null,
+                }),
+            });
+            const data = await response.json().catch(() => ({}));
+
+            if (!response.ok) {
+                const detail = data.detail;
+                errorEl.textContent = typeof detail === "string"
+                    ? detail
+                    : `Signup failed (${response.status}).`;
+                errorEl.hidden = false;
+                return;
+            }
+
+            setAuth(data.access_token, data.email);
+            window.location.href = "index.html";
+        } catch (err) {
+            errorEl.textContent = `Network error: ${err.message}. Is the backend running?`;
+            errorEl.hidden = false;
+        } finally {
+            btn.disabled = false;
+            btn.classList.remove("loading");
+            btn.querySelector(".btn-label").textContent = "Create account";
+        }
+    });
+</script>
+
+</body>
+</html>

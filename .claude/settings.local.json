@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -w '\\\\nHTTP %{http_code}\\\\n' -X POST http://127.0.0.1:8000/signup -H 'Content-Type: application/json' -d '{ *)",
+      "Bash(curl -s -X POST http://127.0.0.1:8000/login -H \"Content-Type: application/json\" -d '{\"email\":\"jane@acme.com\",\"password\":\"securepw123\"}')",
+      "Bash(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8000/signup -H 'Content-Type: application/json' -d '{\"email\":\"rl__TRACKED_VAR__@test.com\",\"password\":\"password123\",\"first_name\":\"A\",\"last_name\":\"B\"}')",
+      "Bash(venv/Scripts/python.exe *)"
+    ]
+  }
+}

@@ -1,0 +1,1254 @@
+================================================================================
+  AI SALES EMAIL GENERATOR — COMPLETE PROJECT DOCUMENTATION
+================================================================================
+
+Last updated: 2026-04-23
+Project root:  D:\ai-sales-email-generator
+
+--------------------------------------------------------------------------------
+  TABLE OF CONTENTS
+--------------------------------------------------------------------------------
+  1.  What this project is
+  2.  Tech stack — everything used, and why
+  3.  Project folder structure
+  4.  How the whole thing works (end-to-end flow)
+  5.  Features (all of them, in detail)
+  6.  Backend files — what each one does
+  7.  Frontend files — what each one does
+  8.  Database schema
+  9.  API endpoints reference
+  10. Authentication system
+  11. LLM integration (provider-agnostic design)
+  12. Rate limiting
+  13. Security measures
+  14. Setup and run instructions
+  15. Environment variables
+  16. How to switch AI providers
+  17. Known limitations
+  18. Future improvements
+  19. Deployment guide — what works and what changes
+  20. Free tier options — what's free, how long, and limits
+
+
+================================================================================
+  1. WHAT THIS PROJECT IS
+================================================================================
+
+A web application that helps sales teams draft professional outreach emails
+using an AI model. The tool focuses on the *sales workflow* — not just
+generating emails, but all the related tasks a sales rep does daily:
+
+  * Write a new cold email from scratch
+  * Write a follow-up when a prospect doesn't reply
+  * Brainstorm 5 subject line variations
+  * Polish an existing draft
+  * Save and reuse past emails
+  * Edit results inline
+  * Send via Gmail or any email client in one click
+
+The entire app runs on your own computer by default using Ollama (a free,
+local AI model runner), so there's no API cost. With a 3-line config change,
+it can also use OpenAI, Google Gemini, Anthropic Claude, Groq, or any other
+OpenAI-compatible LLM provider.
+
+Built as an MVP — not yet deployed publicly, no billing, no multi-tenant
+workspaces. Intended as a personal/demo product that can be extended toward
+a real B2B SaaS.
+
+
+================================================================================
+  2. TECH STACK — EVERYTHING USED AND WHY
+================================================================================
+
+BACKEND (Python)
+----------------
+  FastAPI 0.135           Web framework. Async-friendly, auto-generates OpenAPI
+                          docs at /docs, great type safety with Pydantic.
+  Uvicorn                 ASGI server that actually runs FastAPI.
+  SQLAlchemy 2.0          ORM. Clean Python classes ↔ database tables.
+                          Works with SQLite (dev), Postgres (prod), etc.
+  SQLite                  Zero-install file-based database. Perfect for dev.
+                          Swappable for Postgres by changing DATABASE_URL.
+  Pydantic 2.12           Data validation. Every request body is validated
+                          automatically — bad input returns 422 with details.
+  bcrypt 5.0              Password hashing. Passwords are NEVER stored in
+                          plain text; only one-way bcrypt hashes are saved.
+  PyJWT 2.12              Issues and verifies JSON Web Tokens for sessions.
+  python-dotenv           Loads environment variables from .env file.
+  email-validator         Makes Pydantic's EmailStr actually validate emails.
+  slowapi 0.1.9           Rate limiting — prevents abuse of expensive
+                          endpoints (X requests per minute per IP).
+  OpenAI SDK 2.30         Used to TALK to the AI — not specifically OpenAI.
+                          Works with ANY OpenAI-compatible endpoint
+                          (Ollama, Groq, DeepSeek, Gemini, etc.).
+
+AI MODEL
+--------
+  Ollama                  Runs LLMs locally on your machine. Installed at
+                          C:\Users\sft4\AppData\Local\Programs\Ollama\
+  llama3.2:3b             The default model — 2 GB, runs on 8 GB RAM, free.
+                          Pulled via: ollama pull llama3.2:3b
+
+FRONTEND
+--------
+  Plain HTML / CSS / JavaScript   No framework, no build step, no Node.js.
+                                  Just three files the browser can open.
+  Why no React/Vue?       Adds a build step, node_modules, complexity.
+                          For a project this size, vanilla is cleaner and
+                          the code is easier to follow.
+
+DEV TOOLS
+---------
+  venv                    Python virtual environment — keeps deps isolated
+                          from the system Python.
+  pip                     Package installer.
+
+
+================================================================================
+  3. PROJECT FOLDER STRUCTURE
+================================================================================
+
+  D:\ai-sales-email-generator\
+  │
+  ├── backend/                  # All Python backend code
+  │   ├── __init__.py           (not explicitly created — implicit namespace)
+  │   ├── main.py               FastAPI app, middleware, migrations, CORS
+  │   ├── routes.py             All HTTP endpoints (signup, login, email, etc.)
+  │   ├── services.py           LLM prompts and calls — the "AI brain"
+  │   ├── auth.py               Password hashing, JWT, current_user dependency
+  │   ├── models.py             ORM tables + Pydantic request/response schemas
+  │   ├── db.py                 SQLAlchemy engine, session, Base class
+  │   └── limits.py             slowapi rate-limiter instance
+  │
+  ├── frontend/                 # All UI — open these .html files in browser
+  │   ├── index.html            Main generator page (requires login)
+  │   ├── signup.html           Create account page
+  │   ├── login.html            Log in page
+  │   ├── profile.html          Edit profile + change password
+  │   ├── script.js             All generator-page JavaScript logic
+  │   ├── auth.js               Shared token handling, apiFetch() wrapper
+  │   └── style.css             All styles (one file, ~500 lines)
+  │
+  ├── venv/                     Python virtual environment (gitignored)
+  ├── app.db                    SQLite database file (gitignored)
+  ├── .env                      Secrets and config (gitignored)
+  ├── .env.example              Template for .env (safe to commit)
+  ├── .gitignore                Protects .env, app.db, venv/ from git
+  ├── requirements.txt          Python dependencies list
+  ├── README.md                 Short project overview
+  └── PROJECT_DOCUMENTATION.txt (this file)
+
+
+================================================================================
+  4. HOW THE WHOLE THING WORKS (END-TO-END FLOW)
+================================================================================
+
+STEP 1 — User opens signup.html in browser
+  - Types first name, last name, email, password, company (optional), role.
+  - Frontend sends POST /signup to backend.
+
+STEP 2 — Backend receives signup
+  - Pydantic validates input (email format, password ≥8 chars, etc.).
+  - Checks if email already exists in users table → if yes, 409 error.
+  - Hashes password with bcrypt (produces $2b$12$... hash).
+  - Inserts new row into users table.
+  - Generates a JWT signed with AUTH_SECRET, containing the user's email
+    and expiry (7 days).
+  - Returns {access_token, email} to the frontend.
+
+STEP 3 — Frontend stores token
+  - auth.js saves the token and email in localStorage.
+  - Browser is redirected to index.html.
+
+STEP 4 — index.html checks auth on load
+  - auth.js's requireAuth() runs immediately.
+  - If no token → redirect to login.html.
+  - If token exists → continue loading the page.
+
+STEP 5 — User fills in product/audience/tone/length → clicks Generate
+  - Frontend calls apiFetch("/generate-email", POST).
+  - apiFetch automatically adds "Authorization: Bearer <token>" header.
+  - Backend's current_user dependency verifies the JWT, loads the user
+    from DB, attaches it to the request.
+  - Rate limiter checks: has this IP made >10 requests in the last minute?
+    If yes → 429 Too Many Requests.
+  - Route calls generate_email_content() in services.py.
+
+STEP 6 — services.py builds a prompt and calls the LLM
+  - Constructs a prompt string with product, audience, tone, length, and
+    the user's name/company/role (so the email is signed correctly).
+  - Calls client.chat.completions.create(model=MODEL, messages=...).
+  - The OpenAI SDK sends this to whatever BASE_URL is in .env.
+  - If .env points to Ollama → the request goes to localhost:11434/v1
+    and Ollama generates the email locally.
+  - The response text comes back.
+
+STEP 7 — Route saves to DB and returns
+  - A new row is inserted into email_history table with product, audience,
+    tone, length, result (full generated text), and user_id.
+  - The route returns {"result": "...", "history_id": 42} to frontend.
+
+STEP 8 — Frontend renders the email
+  - script.js's parseEmail() function splits the raw text into
+    Subject / Body / CTA sections (handles markdown asterisks, numbered
+    labels, etc.).
+  - Each section is shown in its own styled block with Copy buttons.
+  - History panel reloads to show the new entry.
+
+STEP 9 — User edits / sends / saves
+  - Each section is contenteditable, so user can click and type.
+  - "Send to" + "Open in Gmail" builds a Gmail compose URL with the
+    edited subject/body/to pre-filled.
+  - "Save edits" calls PATCH /history/{id} to persist changes to DB.
+
+
+================================================================================
+  5. FEATURES — ALL OF THEM, IN DETAIL
+================================================================================
+
+5.1  SIGNUP / LOGIN
+-------------------
+  Users create an account with:
+    - First name, last name (required)
+    - Email + password (≥8 chars, required)
+    - Company, role (optional)
+  Passwords are hashed with bcrypt before storage.
+  Login returns a JWT valid for 7 days.
+  Token is stored in browser localStorage (key: "aiemail_token").
+
+5.2  COLD EMAIL GENERATOR (the original feature)
+------------------------------------------------
+  Input: product, audience, tone (3 options), length (3 options).
+  Output: a complete sales email with Subject, Body, CTA.
+  Behavior: the email is signed off with the user's real name (from their
+  profile), and includes their role/company when set.
+  Endpoint: POST /generate-email
+  Service: generate_email_content() in services.py
+  Auto-saves to email_history.
+
+5.3  FOLLOW-UP GENERATOR
+------------------------
+  Input: a past email from history, days since sent, optional "anything new"
+  note.
+  Output: a short, polite follow-up that:
+    - Briefly references the original (doesn't repeat it)
+    - Is noticeably shorter than the original
+    - Has one clear, low-friction CTA
+    - Incorporates the user's note if provided
+  Stored with parent_id linking back to the original. Shows a "Follow-up"
+  badge and indigo left-border in the history panel.
+  Endpoint: POST /follow-up
+  Service: generate_followup_content() in services.py
+
+5.4  SUBJECT LINE BRAINSTORM
+----------------------------
+  Input: product, audience, tone (no length needed).
+  Output: exactly 5 subject lines, each using a different angle:
+    1. Direct benefit / value
+    2. Curiosity / question hook
+    3. Specific / data-driven
+    4. Pain point / friction
+    5. Low-friction / casual
+  Under 60 characters each, no emojis, no ALL CAPS.
+  A defensive parser handles LLM output variations (numbered lists, bullets,
+  quotes, "Subject 1:" prefixes) and dedupes.
+  Endpoint: POST /subject-lines
+  Service: generate_subject_lines() + _parse_subject_lines()
+
+5.5  EMAIL IMPROVER
+-------------------
+  Input: a rough draft (pasted textarea), optional target tone.
+  Output: a polished rewrite with clear Subject, Body, CTA, signed with the
+  user's real name.
+  Keeps the user's intent and facts, but tightens language, strengthens
+  verbs, cuts fluff.
+  Endpoint: POST /improve-email
+  Service: improve_email_content() in services.py
+
+5.6  EMAIL HISTORY
+------------------
+  Every generated email (cold, follow-up, improved) is saved per user.
+  History panel shows:
+    - Product name
+    - Audience / tone / length / date
+    - Follow-up badge if it's a follow-up
+    - View button (restores the form + result)
+    - Follow up button (opens follow-up form for that entry)
+    - Delete button (with confirm dialog)
+  Endpoints: GET /history, DELETE /history/{id}, PATCH /history/{id}
+
+5.7  INLINE EDITING
+-------------------
+  Every section of a generated email is contenteditable. User can click any
+  section (Subject, Body, CTA) and type directly.
+  Copy buttons, Send buttons, and Save Edits all read from the current
+  (edited) DOM text.
+
+5.8  ONE-CLICK SEND
+-------------------
+  A "Send to" field captures the recipient. Two buttons:
+    - "Open in Gmail" — opens Gmail web compose in a new tab with
+      subject/body/to all pre-filled via URL params.
+    - "Default email" — opens whatever email client the OS has set as
+      default (Outlook, Apple Mail, Thunderbird) via mailto: link.
+  No OAuth, no infrastructure — just opens the user's existing email tool.
+
+5.9  SAVE EDITS
+---------------
+  When viewing an email that came from history, the "Save edits" button
+  appears. Clicking it PATCHes /history/{id} with the current edited text,
+  persisting the changes.
+
+5.10 PROFILE EDITING
+--------------------
+  profile.html lets the logged-in user:
+    - Update first name, last name, company, role
+    - Change password (requires current password for security)
+  Email address cannot be changed.
+  Endpoints: PATCH /me, POST /change-password
+
+5.11 RATE LIMITING
+------------------
+  Per-IP limits applied to expensive/abuse-prone endpoints:
+    - /signup:         5/minute,  30/hour   (anti-spam signup)
+    - /login:         10/minute, 100/hour   (anti-brute-force)
+    - /generate-email:10/minute, 100/hour
+    - /follow-up:     10/minute, 100/hour
+    - /improve-email: 10/minute, 100/hour
+    - /subject-lines: 20/minute, 200/hour   (cheaper endpoint)
+  Over-limit requests get 429 Too Many Requests.
+
+
+================================================================================
+  6. BACKEND FILES — WHAT EACH ONE DOES
+================================================================================
+
+backend/main.py
+---------------
+  - Creates the FastAPI app instance.
+  - Attaches slowapi rate limiter + error handler.
+  - Attaches CORS middleware (allows frontend on any origin to call the API).
+  - Runs Base.metadata.create_all() to create tables on startup.
+  - Runs _apply_lightweight_migrations() — a dev-only helper that adds
+    new columns to existing tables without dropping data (currently just
+    adds parent_id to email_history if missing).
+  - Includes the router from routes.py.
+  - Defines GET / which returns a health-check message.
+
+backend/routes.py
+-----------------
+  All HTTP endpoints live here. Each is a thin wrapper that:
+    1. Takes a Pydantic-validated request body.
+    2. Uses Depends(get_db) to get a database session.
+    3. Uses Depends(current_user) when auth is required.
+    4. Calls a service function (in services.py) if LLM is involved.
+    5. Saves to DB if needed.
+    6. Returns a Pydantic-validated response.
+  Endpoints:
+    POST   /signup              (public)
+    POST   /login               (public)
+    GET    /me                  (auth)
+    PATCH  /me                  (auth)
+    POST   /change-password     (auth)
+    POST   /generate-email      (auth + rate limit)
+    POST   /follow-up           (auth + rate limit)
+    POST   /subject-lines       (auth + rate limit)
+    POST   /improve-email       (auth + rate limit)
+    GET    /history             (auth)
+    PATCH  /history/{id}        (auth)
+    DELETE /history/{id}        (auth)
+
+backend/services.py
+-------------------
+  Contains all LLM-facing logic. Key functions:
+    _build_prompt(...)              Constructs the cold-email prompt.
+    _call_llm(prompt)               Low-level call to the configured LLM,
+                                    with error handling for APIConnectionError
+                                    (helpful message when Ollama is offline).
+    _parse_subject_lines(raw)       Robust parser for the subject-lines LLM
+                                    output — handles bullets, numbers, quotes.
+    generate_email_content(...)     Cold email.
+    generate_followup_content(...)  Follow-up email (different prompt).
+    generate_subject_lines(...)     5 subject lines.
+    improve_email_content(...)      Draft rewriter.
+  The OpenAI client is created once at module load using .env values:
+    API_KEY, BASE_URL, MODEL.
+
+backend/auth.py
+---------------
+  Authentication primitives:
+    hash_password(pw)               bcrypt hash.
+    verify_password(pw, hash)       bcrypt compare.
+    create_access_token(email)      Creates a signed JWT with sub=email
+                                    and exp=now+7days.
+    current_user(token, db)         FastAPI dependency — extracts bearer
+                                    token from Authorization header, decodes
+                                    JWT, loads user from DB. Raises 401 if
+                                    invalid or user not found.
+  Secret key: reads AUTH_SECRET from .env, or generates a random one at
+  startup (which invalidates old tokens on restart — so AUTH_SECRET should
+  be set in .env for tokens to survive restarts).
+
+backend/models.py
+-----------------
+  Two kinds of classes mixed in one file (fine for a project this size):
+
+  ORM MODELS (SQLAlchemy — map to DB tables):
+    User           id, email, password_hash, first_name, last_name,
+                   company, role, created_at. Relationship to emails.
+    EmailHistory   id, user_id (FK), parent_id (FK to self, nullable),
+                   product, audience, tone, length, result, created_at.
+
+  PYDANTIC SCHEMAS (validated request/response):
+    SignupRequest           Signup body.
+    LoginRequest            Login body.
+    TokenResponse           JWT response.
+    UserResponse            Profile response.
+    ProfileUpdate           PATCH /me body.
+    ChangePasswordRequest   POST /change-password body.
+    EmailRequest            POST /generate-email body.
+    FollowUpRequest         POST /follow-up body.
+    SubjectLinesRequest     POST /subject-lines body.
+    SubjectLinesResponse    Response containing list of subject strings.
+    ImproveEmailRequest     POST /improve-email body.
+    HistoryUpdate           PATCH /history/{id} body.
+    EmailHistoryResponse    GET /history response item.
+
+backend/db.py
+-------------
+  - Reads DATABASE_URL from .env.
+  - Creates SQLAlchemy engine (with SQLite-specific connect_args if URL
+    starts with "sqlite:").
+  - Creates SessionLocal sessionmaker.
+  - Defines Base class that all ORM models inherit from.
+  - Defines get_db() dependency — yields a session, closes it after the
+    request finishes.
+
+backend/limits.py
+-----------------
+  - Creates a single slowapi Limiter instance.
+  - Key function = remote IP address.
+  - Default global limit: 300 requests/minute.
+  - Individual endpoints override this with @limiter.limit(...) decorators
+    in routes.py.
+
+
+================================================================================
+  7. FRONTEND FILES — WHAT EACH ONE DOES
+================================================================================
+
+frontend/index.html
+-------------------
+  The main generator page. Requires login (redirects to login.html if no
+  token). Contains:
+    - Top navigation bar (brand, user email, Profile link, Log out button)
+    - Hero header
+    - "Tell us about your email" form card (product, audience, tone, length,
+      Generate Email, Brainstorm subject lines)
+    - Subject lines card (shows 5 generated subjects)
+    - Email improver card (paste draft, improve)
+    - Follow-up card (hidden; opens when user clicks Follow up in history)
+    - Result card (with Send bar, editable sections, history)
+    - Error card (shown only when there's an error)
+    - History card (past emails, View/Follow up/Delete per item)
+  Loads: auth.js (first, so requireAuth runs immediately), script.js (deferred).
+
+frontend/login.html
+-------------------
+  Simple login form. Redirects to index.html if already logged in.
+  Submits to POST /login, stores token in localStorage on success.
+
+frontend/signup.html
+--------------------
+  Signup form with name/email/password/company/role fields.
+  Submits to POST /signup, stores token, redirects to index.html.
+
+frontend/profile.html
+---------------------
+  Two forms:
+    - Account details (name/company/role) → PATCH /me
+    - Change password (current + new) → POST /change-password
+  Email is shown but disabled (cannot be changed).
+
+frontend/auth.js
+----------------
+  Shared across all pages. Provides:
+    getToken(), setAuth(), clearAuth()   Token storage in localStorage.
+    requireAuth()                         Used on protected pages.
+    redirectIfAuthenticated()             Used on login/signup pages.
+    apiFetch(path, options)               Wrapper around fetch that:
+                                            - Prepends API_BASE
+                                            - Auto-adds Authorization header
+                                            - Redirects to login on 401
+                                            - Defaults Content-Type for JSON
+    logout()                              Clear token + redirect to login.
+
+frontend/script.js
+------------------
+  All logic for index.html:
+    - Builds apiFetch calls for /generate-email, /follow-up, /subject-lines,
+      /improve-email, /history.
+    - parseEmail()       Extracts Subject/Body/CTA from the raw LLM output
+                         (handles asterisks, different label styles, etc.).
+    - renderEmail()      Updates the result card sections, tracks currentHistoryId.
+    - generateEmail()    Main flow for new emails.
+    - generateSubjects() Subject line flow.
+    - improveEmail()     Draft rewrite flow.
+    - showFollowUp()/submitFollowUp() Follow-up flow.
+    - loadHistory()/renderHistory() History panel rendering.
+    - openInGmail()/openInDefault() Send buttons.
+    - saveEdits()        PATCHes /history/{id} with current edits.
+    - copyText()/copyAll() Clipboard utilities.
+  Loading states, error rendering, copy feedback all handled here.
+
+frontend/style.css
+------------------
+  One stylesheet for the whole app. Uses CSS custom properties (variables)
+  at the top for theme colors, so changing the indigo accent is a one-line
+  edit. Includes:
+    - Reset + base typography
+    - Gradient page background
+    - Card, button (primary/secondary/ghost), field, grid layouts
+    - Topbar, auth-card, hero
+    - Result card with editable sections, send bar, email sections
+    - History list items with badge + accent
+    - Subjects list with numbered badges
+    - Follow-up card styles
+    - Error card / form-error / form-success styles
+    - Spinners (light + dark)
+    - Responsive breakpoint at 520px for mobile
+
+
+================================================================================
+  8. DATABASE SCHEMA
+================================================================================
+
+Table: users
+------------
+  id              INTEGER PRIMARY KEY AUTOINCREMENT
+  email           VARCHAR(255) UNIQUE NOT NULL   (indexed)
+  password_hash   VARCHAR(255) NOT NULL          (bcrypt)
+  first_name      VARCHAR(100) NOT NULL
+  last_name       VARCHAR(100) NOT NULL
+  company         VARCHAR(150) NULL
+  role            VARCHAR(100) NULL
+  created_at      DATETIME NOT NULL
+
+Table: email_history
+--------------------
+  id              INTEGER PRIMARY KEY AUTOINCREMENT
+  user_id         INTEGER NOT NULL  (FK users.id, ON DELETE CASCADE, indexed)
+  parent_id       INTEGER NULL      (FK email_history.id, ON DELETE SET NULL,
+                                     indexed — points to original for
+                                     follow-ups; NULL for cold emails)
+  product         VARCHAR(200) NOT NULL
+  audience        VARCHAR(200) NOT NULL
+  tone            VARCHAR(30)  NOT NULL
+  length          VARCHAR(30)  NOT NULL
+  result          TEXT         NOT NULL  (full generated email)
+  created_at      DATETIME     NOT NULL  (indexed)
+
+Example rows currently in app.db (as of last smoke test):
+  users:
+    (1, jane@acme.com, ...hash..., Jane, Doe, Acme Global, VP Sales)
+    (2, laksh1204@maildrop.com, ...hash..., ..., ..., ..., ...)
+  email_history:
+    (1, user=1, parent=NULL, "CRM software", ...)        ← cold email
+    (2, user=2, parent=NULL, "Bottle", ...)              ← cold email
+    (3, user=1, parent=1, "Follow-up: CRM software", ...) ← follow-up of #1
+
+
+================================================================================
+  9. API ENDPOINTS REFERENCE
+================================================================================
+
+PUBLIC (no auth required):
+  POST /signup
+    body:   {email, password, first_name, last_name, company?, role?}
+    return: {access_token, token_type, email}  (201)
+    errors: 409 (email exists), 422 (validation), 429 (rate limit)
+
+  POST /login
+    body:   {email, password}
+    return: {access_token, token_type, email}
+    errors: 401 (bad creds), 429 (rate limit)
+
+AUTHENTICATED (require Authorization: Bearer <token>):
+  GET /me
+    return: {email, first_name, last_name, company, role}
+
+  PATCH /me
+    body:   {first_name?, last_name?, company?, role?}
+    return: updated user
+
+  POST /change-password
+    body:   {current_password, new_password}
+    return: 204 on success
+    errors: 401 (wrong current password)
+
+  POST /generate-email                          (rate: 10/min, 100/hr)
+    body:   {product, audience, tone, length}
+    return: {result, history_id}
+    errors: 429 (rate), 502 (LLM unreachable)
+
+  POST /follow-up                               (rate: 10/min, 100/hr)
+    body:   {history_id, days_since_sent, note?}
+    return: {result, history_id, parent_id}
+    errors: 404 (original not yours), 429, 502
+
+  POST /subject-lines                           (rate: 20/min, 200/hr)
+    body:   {product, audience, tone}
+    return: {subjects: [str, ...]}
+    errors: 429, 502
+
+  POST /improve-email                           (rate: 10/min, 100/hr)
+    body:   {draft, tone?}
+    return: {result}
+    errors: 422 (draft too short), 429, 502
+
+  GET /history?limit=50
+    return: [{id, parent_id, product, audience, tone, length,
+              result, created_at}, ...]
+
+  PATCH /history/{id}
+    body:   {result}
+    return: updated history row
+    errors: 404 (not yours)
+
+  DELETE /history/{id}
+    return: 204
+    errors: 404 (not yours)
+
+Interactive docs: run the backend, open http://127.0.0.1:8000/docs
+(FastAPI auto-generates Swagger UI — every endpoint there can be tested
+interactively, including the auth flow).
+
+
+================================================================================
+  10. AUTHENTICATION SYSTEM
+================================================================================
+
+HOW IT WORKS:
+  1. User submits /signup or /login with email + password.
+  2. Backend verifies or creates the user.
+  3. Backend generates a JWT:
+       header:  {"alg": "HS256", "typ": "JWT"}
+       payload: {"sub": "user@example.com", "exp": <unix-timestamp>}
+       signed with AUTH_SECRET using HS256.
+  4. Token returned in response body.
+  5. Frontend stores in localStorage (key: "aiemail_token").
+  6. On every subsequent request, auth.js attaches:
+       Authorization: Bearer <token>
+  7. Backend's current_user dependency:
+       - Extracts the token from the Authorization header.
+       - Decodes+verifies signature with AUTH_SECRET.
+       - Checks exp is in the future.
+       - Loads the user from the DB by email.
+       - Returns the User object, which FastAPI injects into the route.
+  8. If any step fails → 401 Unauthorized.
+  9. On 401, auth.js's apiFetch automatically clears the token and
+     redirects to login.html.
+
+TOKEN LIFETIME: 7 days (TOKEN_TTL_HOURS = 24 * 7 in auth.py).
+
+PASSWORD STORAGE:
+  Never stored in plain text. Flow:
+    hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt())
+  bcrypt automatically adds a salt and hashes at 12 cost factor.
+  Stored string looks like: $2b$12$kjPc8kSWrFuwqwCGH6s09u5...
+
+  On login verify:
+    bcrypt.checkpw(password.encode(), stored_hash.encode())
+
+SECURITY NOTES:
+  - AUTH_SECRET should be at least 64 random bytes; set in .env.
+  - If AUTH_SECRET changes, all existing tokens are invalidated.
+  - Tokens are NOT revokable server-side (stateless JWT) — if you need
+    logout-on-server, add a token blacklist table. Not yet implemented.
+  - In production over HTTPS, localStorage is acceptable. Over plain HTTP,
+    tokens can be intercepted — HTTPS is mandatory before deploying.
+
+
+================================================================================
+  11. LLM INTEGRATION — PROVIDER-AGNOSTIC DESIGN
+================================================================================
+
+KEY INSIGHT: most modern LLM providers expose an OpenAI-compatible endpoint.
+This means the same code can talk to OpenAI, Ollama, Groq, Gemini, Claude,
+DeepSeek, etc. The only thing that changes is three .env variables.
+
+HOW IT'S IMPLEMENTED:
+  services.py:
+    client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
+    client.chat.completions.create(model=MODEL, messages=[...])
+
+  The OpenAI Python SDK doesn't care that you're calling Ollama — it just
+  sends an HTTP request to BASE_URL using the OpenAI API schema.
+
+DEFAULT CONFIG (in .env):
+  OPENAI_API_KEY=ollama                      (any string works for Ollama)
+  OPENAI_BASE_URL=http://localhost:11434/v1  (Ollama's OpenAI-compat endpoint)
+  OPENAI_MODEL=llama3.2:3b                   (whatever model you've pulled)
+
+PROMPT DESIGN:
+  Each service function builds a specific prompt that tells the model:
+    - What it should produce (a sales email, a follow-up, subject lines, etc.)
+    - Context (sender's name, company, role — for signing emails correctly)
+    - Format (Subject:, Email:, CTA: markers so the frontend can parse)
+    - Constraints (length limits, style, what not to do)
+
+ERROR HANDLING:
+  If the LLM backend is unreachable (Ollama off, wrong URL, etc.),
+  APIConnectionError is raised. _call_llm catches it and returns a
+  helpful message that tells the user what to do:
+    "Could not reach model backend at <URL>. If using Ollama, make sure
+     it is installed and running..."
+
+PARSING THE OUTPUT:
+  Different LLMs format their responses differently. llama3.2:3b often
+  uses markdown (**Subject:**), while gpt-4o-mini uses plain text.
+  script.js's parseEmail() is defensive:
+    - Strips all ** markdown
+    - Matches labels case-insensitively: Subject, Email, Body, Message,
+      CTA, Call to Action
+    - Supports both "Subject: foo" and "Subject:\nfoo" layouts
+    - If no labels found, puts everything in the Body section (fallback)
+
+
+================================================================================
+  12. RATE LIMITING
+================================================================================
+
+LIBRARY: slowapi (a FastAPI-compatible port of Flask-Limiter).
+
+KEY FUNCTION: get_remote_address — uses the requesting client IP.
+
+HOW IT'S APPLIED:
+  - main.py attaches the limiter to app.state and adds error handler +
+    middleware.
+  - routes.py decorates individual endpoints:
+      @router.post("/generate-email")
+      @limiter.limit("10/minute;100/hour")
+      def generate_email(request: Request, ...):
+  - The `request: Request` parameter is REQUIRED — slowapi uses it to
+    extract the IP. FastAPI injects it automatically.
+
+STORAGE:
+  Limits are kept in-memory by default. This means:
+    - Restarting the backend resets all counters.
+    - Doesn't work across multiple backend processes (use Redis for that).
+  For single-process dev/demo use, in-memory is perfect.
+
+RATES:
+  See section 5.11 above for the table of limits.
+
+RESPONSE WHEN LIMIT HIT:
+  HTTP 429 Too Many Requests
+  Body: {"error": "Rate limit exceeded: <limit>"}
+
+IMPORTANT LIMITATION:
+  Key is per-IP. In a corporate office with NAT, all users share one IP.
+  For real multi-tenant production: switch the key function to use the
+  authenticated user email (requires a small refactor).
+
+
+================================================================================
+  13. SECURITY MEASURES
+================================================================================
+
+✅ IMPLEMENTED:
+  - bcrypt password hashing (cost 12, salted per-password)
+  - JWT with HS256 signature, 7-day expiry
+  - Rate limiting on auth + LLM endpoints
+  - Pydantic validation on every request body (blocks malformed input)
+  - SQLAlchemy ORM = parameterized queries (no raw SQL concatenation =
+    no SQL injection)
+  - Ownership checks on /history and /follow-up (can't access others'
+    emails even if you guess an id)
+  - .env, .env.local, app.db, venv/ in .gitignore (no secrets leak on
+    git push)
+  - CORS configured with allow_credentials=False (safe with wildcard origins)
+  - Generic login error message ("Incorrect email or password") — doesn't
+    reveal whether the email exists
+  - Change-password requires current password
+
+❌ NOT YET IMPLEMENTED (for a real production deploy):
+  - HTTPS (required before deploying — tokens over plain HTTP are stealable)
+  - Password reset via email
+  - Email verification on signup
+  - Account lockout after N failed login attempts
+  - Server-side token revocation / logout blacklist
+  - CSRF protection (not needed for Bearer token auth, but needed if you
+    switch to cookie auth)
+  - Content Security Policy headers
+  - Input sanitization for XSS — currently we use textContent everywhere
+    in JS which is safe, but innerHTML anywhere would need escaping
+  - Dependency vulnerability scanning (run `pip audit` before deploy)
+
+
+================================================================================
+  14. SETUP AND RUN INSTRUCTIONS
+================================================================================
+
+ONE-TIME SETUP:
+  1. Install Python 3.12 from https://python.org (add to PATH).
+  2. Open the project in a terminal:
+       cd D:\ai-sales-email-generator
+  3. Create a virtual environment:
+       python -m venv venv
+  4. Activate it:
+       venv\Scripts\activate        (Windows)
+  5. Install dependencies:
+       pip install -r requirements.txt
+  6. Install Ollama from https://ollama.com/download/windows
+  7. Pull the model:
+       ollama pull llama3.2:3b
+  8. Create .env (copy from .env.example):
+       copy .env.example .env
+  9. Generate a random AUTH_SECRET:
+       python -c "import secrets; print(secrets.token_urlsafe(64))"
+     Paste the output into .env's AUTH_SECRET line.
+
+EVERY TIME YOU RUN IT:
+  1. Make sure Ollama is running (it's in the Windows system tray after
+     install; if not, launch the Ollama app).
+  2. Activate venv:
+       venv\Scripts\activate
+  3. Start backend:
+       python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
+  4. Open frontend/signup.html in a browser (any browser works).
+  5. Create an account, log in, use the app.
+  6. To stop: Ctrl+C in the terminal running uvicorn.
+
+DURING DEVELOPMENT:
+  - Add --reload to uvicorn to auto-restart on code changes:
+       python -m uvicorn backend.main:app --reload
+  - --reload only watches .py files. Changes to .env require a full
+    restart (stop Ctrl+C, then re-run).
+
+TROUBLESHOOTING:
+  "Failed to fetch" in browser       → Backend not running. Start uvicorn.
+  "401 Incorrect API key"            → Wrong/placeholder API key in .env.
+  "Could not reach model backend"    → Ollama isn't running. Launch Ollama app.
+  "429 Too Many Requests"            → Rate limit — wait a minute.
+  "ModuleNotFoundError"              → Forgot to activate venv, or missed
+                                       `pip install -r requirements.txt`.
+  DB schema mismatch after model change → startup migration covers
+                                       adding columns; if bigger changes
+                                       needed, delete app.db and restart.
+
+
+================================================================================
+  15. ENVIRONMENT VARIABLES
+================================================================================
+
+Stored in .env at project root. NEVER committed to git (covered by .gitignore).
+
+LLM CONFIG (all three required):
+  OPENAI_API_KEY       API key or literal "ollama" for local Ollama.
+  OPENAI_BASE_URL      Full URL to the OpenAI-compatible endpoint.
+  OPENAI_MODEL         Model name (e.g. "llama3.2:3b", "gpt-4o-mini").
+
+AUTH / DB:
+  AUTH_SECRET          Random 64-byte URL-safe string. If unset, a random
+                       one is generated at startup (but then tokens don't
+                       survive restart — always set this explicitly).
+  DATABASE_URL         Default: sqlite:///./app.db
+                       Can be changed to postgres:// for production.
+
+
+================================================================================
+  16. HOW TO SWITCH AI PROVIDERS
+================================================================================
+
+ZERO CODE CHANGES NEEDED. Just edit .env and restart backend.
+
+Examples:
+
+  Ollama (default, free, local):
+    OPENAI_API_KEY=ollama
+    OPENAI_BASE_URL=http://localhost:11434/v1
+    OPENAI_MODEL=llama3.2:3b
+
+  OpenAI (paid, cloud):
+    OPENAI_API_KEY=sk-proj-...
+    OPENAI_BASE_URL=https://api.openai.com/v1
+    OPENAI_MODEL=gpt-4o-mini
+
+  Google Gemini (free tier, cloud):
+    OPENAI_API_KEY=AIza...
+    OPENAI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+    OPENAI_MODEL=gemini-2.0-flash
+
+  Anthropic Claude (paid, cloud):
+    OPENAI_API_KEY=sk-ant-...
+    OPENAI_BASE_URL=https://api.anthropic.com/v1/
+    OPENAI_MODEL=claude-haiku-4-5
+
+  Groq (fast, cheap, cloud):
+    OPENAI_API_KEY=gsk_...
+    OPENAI_BASE_URL=https://api.groq.com/openai/v1
+    OPENAI_MODEL=llama-3.3-70b-versatile
+
+Quality ranking for this use case (cold sales emails), roughly:
+  gpt-4o-mini  ≈  claude-haiku-4-5  >  gemini-2.0-flash  >
+  llama-3.3-70b  >  llama3.2:3b  >  llama3.2:1b
+
+
+================================================================================
+  17. KNOWN LIMITATIONS
+================================================================================
+
+PRODUCT:
+  - No password reset email (users who forget password are locked out).
+  - No email verification on signup.
+  - No multi-user workspaces / teams.
+  - No billing / subscription.
+  - Email history limit = 100 (configurable in GET /history limit param).
+  - No bulk mode (can't upload a CSV of leads).
+  - No templates / saved presets.
+  - No CRM integrations (HubSpot, Salesforce).
+  - No analytics (open rates, reply rates).
+
+TECHNICAL:
+  - SQLite is single-writer — won't scale past ~1000 users. Swap to
+    Postgres by changing DATABASE_URL when needed.
+  - In-memory rate limiting — doesn't work across multiple uvicorn workers.
+    Use Redis-backed slowapi for prod.
+  - Small local models (llama3.2:3b) sometimes ignore prompt instructions
+    (e.g. leave `[Your Name]` placeholders). Switch to a bigger model
+    via .env when needed.
+  - First LLM call after server start is slow (5–15s model load into RAM).
+    Subsequent calls are faster.
+  - Follow-up prompt gives the model the FULL original email, which
+    consumes tokens — fine for Ollama (free), expensive at scale with
+    paid APIs. Could switch to summary-based follow-ups for cost.
+  - No streaming — user waits for full response. Would improve UX a lot.
+
+SECURITY:
+  - No HTTPS yet (required before any public deploy).
+  - No Content-Security-Policy header.
+  - Tokens in localStorage — fine on HTTPS, vulnerable on plain HTTP.
+
+
+================================================================================
+  18. FUTURE IMPROVEMENTS (prioritized)
+================================================================================
+
+TIER 1 — before public deploy:
+  - HTTPS + real domain
+  - Password reset via email (needs SMTP or Resend/SendGrid)
+  - Email verification on signup
+  - Automated tests (pytest for backend, Playwright for frontend)
+  - Error logging / monitoring (Sentry)
+  - Alembic for proper migrations (replace the inline ALTER TABLE pattern)
+
+TIER 2 — to differentiate from ChatGPT (when seeking customers):
+  - Bulk mode: upload CSV of leads → generate personalized email per row
+  - Brand voice training: upload 5 past good emails → model learns tone
+  - Reply drafter: paste incoming email → draft a reply
+  - Lead researcher: paste company URL → AI-researched brief before pitch
+  - Templates / saved presets
+  - Streaming responses (tokens appear as they generate)
+  - Dark mode
+
+TIER 3 — real SaaS:
+  - Gmail / Outlook OAuth for true one-click send from user's own account
+  - Stripe billing + usage-based pricing
+  - Multi-tenant workspaces (one company = many users)
+  - CRM integrations (HubSpot, Salesforce, Pipedrive)
+  - Email tracking (open rates, link clicks) — requires sending through
+    the app's own infra
+  - Analytics dashboard
+
+TIER 4 — moat:
+  - Feedback loop: track which emails got replies → feed back into prompt
+  - Industry-specific fine-tuned models
+  - White-label for agencies
+  - SOC 2 / GDPR compliance tooling
+
+
+================================================================================
+  19. DEPLOYMENT GUIDE — WHAT WORKS AND WHAT CHANGES
+================================================================================
+
+THE BIG PICTURE
+---------------
+Once deployed, the app works on ANY device with a browser — phones, tablets,
+laptops, other people's PCs. You just share a URL. The UI is already
+responsive (has a mobile breakpoint at 520px).
+
+Currently, everything runs on localhost:
+  Your browser -> Your laptop's backend (localhost:8000)
+               -> Your laptop's Ollama (localhost:11434)
+
+After deployment, it becomes:
+  Any browser anywhere -> Cloud backend (e.g. api-myapp.onrender.com)
+                       -> Cloud LLM provider (e.g. Gemini API)
+
+THE BIG GOTCHA: OLLAMA DOES NOT TRAVEL
+--------------------------------------
+The cloud server you deploy to will NOT have Ollama installed. It cannot
+reach your laptop's Ollama either (different network, firewalled).
+
+Before deploying, you must pick one:
+
+  OPTION A — Switch to a cloud LLM (recommended)
+    3-line change in .env. No code changes.
+    See section 16 for exact values for each provider.
+    Cost: $0 on Gemini free tier, ~$0.001/email on OpenAI.
+
+  OPTION B — Deploy Ollama too (expensive, overkill)
+    Requires a server with 8+ GB RAM and ideally a GPU.
+    Costs $30-$200/month. Only worth it if data must never leave
+    your infrastructure.
+
+WHAT HAS TO CHANGE BEFORE DEPLOYING
+-----------------------------------
+1) Frontend API URL
+   Currently hardcoded in frontend/auth.js and frontend/script.js:
+     const API_URL = "http://127.0.0.1:8000/generate-email";
+     const API_BASE = "http://127.0.0.1:8000";
+   Change these to the real backend URL (or make it configurable via a
+   small config.js that gets swapped per environment).
+
+2) CORS restriction
+   In backend/main.py:
+     allow_origins=["*"]      <-- too permissive for production
+   Change to:
+     allow_origins=["https://myapp.vercel.app"]
+
+3) HTTPS
+   Required (not optional). Tokens in localStorage are safe over HTTPS;
+   over plain HTTP they can be intercepted. All major hosts (Vercel,
+   Render, Railway, Fly) give free HTTPS automatically via Let's Encrypt.
+
+4) Database persistence
+   On Render free tier, the disk is ephemeral — SQLite's app.db file
+   will be lost on redeploy. Two options:
+     a) Attach a persistent disk (Render paid, or Fly volumes)
+     b) Switch to Postgres by changing DATABASE_URL in .env:
+        DATABASE_URL=postgresql://user:pass@host:5432/dbname
+     No code change needed — SQLAlchemy handles both.
+
+5) LLM provider
+   Switch from Ollama to a cloud provider (section 16 has exact .env
+   values for Gemini / OpenAI / Groq / Claude).
+
+WHERE TO DEPLOY
+---------------
+TYPICAL SPLIT:
+  FRONTEND (static HTML/CSS/JS)
+    Vercel       — fastest CDN, simple, free forever.
+    Netlify      — similar, equally good.
+
+  BACKEND (FastAPI)
+    Render       — free tier, sleeps after 15 min idle.
+    Fly.io       — free tier (3 small VMs, 3 GB storage).
+    Railway      — was free, now $5/month minimum.
+    AWS / GCP    — only if you know what you're doing (complex).
+
+  DATABASE (optional, if switching off SQLite)
+    Supabase     — Postgres + auth (can replace our auth too if wanted).
+    Neon         — serverless Postgres, cold-starts in <1s.
+
+STEP-BY-STEP DEPLOYMENT (high level):
+  1. Push code to a GitHub repo (make sure .env is gitignored).
+  2. Create Vercel account, connect the repo, point to frontend/ folder.
+     -> Frontend is live at yourapp.vercel.app.
+  3. Create Render account, connect the repo, configure:
+       Build command:  pip install -r requirements.txt
+       Start command:  uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+     Add environment variables: OPENAI_API_KEY, OPENAI_BASE_URL,
+       OPENAI_MODEL, AUTH_SECRET, DATABASE_URL.
+     -> Backend is live at yourapp.onrender.com.
+  4. Update frontend API URL to point to the Render backend URL, push.
+     Vercel auto-redeploys.
+  5. Tighten backend/main.py CORS to the Vercel domain, push.
+     Render auto-redeploys.
+
+TOTAL TIME: ~2-3 hours once you know the steps.
+TOTAL COST: $0 for a demo. $5-20/month at small real-user scale.
+
+
+================================================================================
+  20. FREE TIER OPTIONS — WHAT'S FREE, HOW LONG, AND LIMITS
+================================================================================
+
+SHORT ANSWER: you can run this entire project publicly for $0, forever, as
+long as usage stays within the free limits below. For demos, friends, and
+early testers — completely free. For 500+ real users, you'll need paid.
+
+HOSTING FREE TIERS
+------------------
+VERCEL (frontend)
+  Free forever for personal / hobby projects.
+  Limits:
+    - 100 GB bandwidth/month
+    - Unlimited visits
+    - HTTPS included
+    - Auto-deploys on git push
+  Good for: frontend. Basically never hit the limit for this project.
+
+RENDER (backend)
+  Free forever.
+  Limits:
+    - 750 hours/month of compute (enough for 1 always-on app)
+    - Sleeps after 15 MINUTES of inactivity
+    - First visitor after sleep waits 30-60 seconds (cold start)
+    - 500 MB RAM
+    - Disk is EPHEMERAL — data is lost on redeploy
+  Good for: demos. Annoying for real users because of the sleep.
+  Upgrade ($7/month Starter): no sleep, persistent disk.
+
+FLY.IO (backend alternative)
+  Free allowance for small apps.
+  Limits:
+    - 3 shared-cpu-1x VMs (256 MB RAM each)
+    - 3 GB persistent storage total
+    - 160 GB outbound bandwidth/month
+  Good for: backend with real persistence.
+  No sleep, but cold-starts when scaled to zero.
+
+RAILWAY (backend alternative)
+  NOT free anymore — $5/month minimum (was free once).
+  Skip unless you specifically want it.
+
+LLM FREE TIERS (the most important choice)
+------------------------------------------
+GOOGLE GEMINI API (best free choice for this project)
+  Model: gemini-2.0-flash
+  Limits (free tier, non-commercial use):
+    - 15 requests per MINUTE
+    - 1,500 requests per DAY
+    - 1 million tokens per minute
+  Quality: very good for sales emails, close to gpt-4o-mini.
+  OpenAI-compatible endpoint — drop-in replacement, no code change.
+  Setup: create key at https://aistudio.google.com/app/apikey
+  .env values:
+    OPENAI_API_KEY=AIza...
+    OPENAI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+    OPENAI_MODEL=gemini-2.0-flash
+
+GROQ (fastest inference)
+  Free tier with rate limits (varies by model).
+  Typically ~30 req/min, ~14,400 req/day for llama models.
+  Extremely fast (usually under 1 second).
+  Quality: great with Llama 3.3 70B.
+  OpenAI-compatible.
+  Setup: create key at https://console.groq.com/keys
+
+OPENROUTER (multiple providers behind one API)
+  Has some FREE models (look for names ending in ":free"):
+    - deepseek/deepseek-chat:free
+    - meta-llama/llama-3.3-70b-instruct:free
+  Limits: ~20 req/min on free models.
+  Good for experimenting with different models.
+
+CLOUDFLARE WORKERS AI
+  Generous free tier on their LLM inference. Requires using their
+  specific SDK, so NOT a drop-in replacement.
+
+HUGGING FACE INFERENCE API
+  Free but rate-limited. Models vary in quality.
+
+OPENAI
+  NO free tier (removed in 2024). Pay-as-you-go starting at $5 top-up.
+
+ANTHROPIC CLAUDE (API)
+  NO free tier on the API. Claude.ai web app is free but can't be used
+  programmatically.
+
+DATABASE FREE TIERS
+-------------------
+SQLITE (on your backend host)
+  "Free" in that no separate service is needed — it's just a file.
+  Works perfectly on Fly.io (persistent volumes).
+  Risky on Render free tier (ephemeral disk).
+
+SUPABASE
+  Free forever.
+  Limits:
+    - 500 MB Postgres storage
+    - 2 GB bandwidth/month
+    - 50,000 monthly active users
+    - Pauses after 1 WEEK of inactivity (resumes when you hit it again)
+  Good for: small real apps. Plenty for thousands of users and emails.
+
+NEON
+  Free forever.
+  Limits:
+    - 0.5 GB storage
+    - 1 project with 10 branches
+    - 5 compute hours/day (then throttles)
+  Good for: dev/demo. Cold starts in <1 second.
+
+HOW MANY PEOPLE CAN USE IT ON FREE TIER?
+----------------------------------------
+There's no "device limit" — any browser with the URL can access it.
+Real limits come from:
+  - LLM rate limits (the bottleneck)
+  - Hosting bandwidth
+  - Backend concurrency (Render free = 1 worker)
+
+USE-CASE EXAMPLES (all on free tier):
+
+  Scenario: You + 5-10 friends testing it
+    - Cost: $0 forever.
+    - Works perfectly.
+
+  Scenario: 50 active users, each generates ~5 emails per day
+    - 50 x 5 = 250 emails/day. Gemini free = 1500/day. Fine.
+    - Groq free: also fine.
+    - Cost: $0.
+
+  Scenario: 500 active users, each generates 5 emails per day
+    - 500 x 5 = 2500 emails/day. Exceeds Gemini free (1500/day).
+    - Peak-hour bursts will hit 15 req/min limit.
+    - Need to upgrade LLM (Gemini paid tier: $0.10 per 1M tokens —
+      still <$10/month at this volume).
+    - Cost: ~$10-20/month.
+
+  Scenario: Viral launch, 5000 users in one day
+    - All free tiers blown. Expect:
+      - LLM: ~$50-100/day on Gemini paid or OpenAI.
+      - Render: needs to upgrade to avoid sleep and handle concurrency.
+      - Cost: ~$100-300/month at this sustained scale.
+
+HOW LONG DOES "FREE" LAST?
+--------------------------
+- Vercel: forever. They make money on enterprise; personal is free.
+- Render: forever. The sleep limitation encourages upgrades.
+- Fly.io: forever, as long as you stay within free allowances.
+- Supabase: forever. Will pause inactive projects but won't delete.
+- Gemini free tier: forever, but Google could change terms anytime.
+  (They've kept free tiers going for years, so this is low risk.)
+- Groq: forever in concept, but rate limits can change.
+
+No free tier is a contract — all providers reserve the right to change
+limits or pricing. In practice, they rarely do for the worse.
+
+RECOMMENDED FREE STACK FOR THIS PROJECT
+---------------------------------------
+  Frontend:   Vercel
+  Backend:    Render free tier (accept the 15-min sleep for demos)
+  Database:   Supabase Postgres (or SQLite on Fly.io if you prefer)
+  LLM:        Google Gemini 2.0 Flash
+
+This combo stays at $0 forever for demo / early-adopter use, and gives
+you a real URL you can share with anyone, on any device.
+
+WHEN YOU SHOULD GO PAID
+-----------------------
+- Backend sleep is annoying your real users → Render Starter ($7/mo).
+- LLM rate limits are being hit → switch to paid Gemini or OpenAI
+  ($5-30/mo at small scale).
+- You want a real domain → ~$10/year at Namecheap/Cloudflare/Porkbun.
+- Total realistic monthly cost once you have paying customers: $15-50.
+
+
+================================================================================
+  END OF DOCUMENTATION
+================================================================================
+
+Questions, issues, or want to extend this project? Just ask.

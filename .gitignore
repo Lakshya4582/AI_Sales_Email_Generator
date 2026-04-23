@@ -1,0 +1,31 @@
+# Environment / secrets — NEVER commit
+.env
+.env.local
+*.pem
+
+# Local DB (contains user data + hashes)
+app.db
+*.sqlite
+*.sqlite3
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs / tmp
+*.log
+/tmp/

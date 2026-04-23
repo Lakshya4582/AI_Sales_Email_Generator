@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Sales Email Generator</title>
+    <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<script src="config.js"></script>
+<script src="auth.js"></script>
+<script>if (!requireAuth()) { /* redirected to login */ }</script>
+
+<main class="app">
+    <nav class="topbar">
+        <span class="brand">AI Email Generator</span>
+        <div class="topbar-right">
+            <span class="user-email" id="user-email"></span>
+            <a href="profile.html" class="ghost">Profile</a>
+            <button class="ghost" onclick="logout()">Log out</button>
+        </div>
+    </nav>
+
+    <header class="hero">
+        <h1>Laxmikant’s Smart Sales Email Generator</h1>
+        <p class="subtitle">Professional outreach in seconds — private, local, and AI-powered.</p>
+    </header>
+
+    <section class="card" id="form-card">
+        <h2>Tell us about your email</h2>
+
+        <div class="field">
+            <label for="product">Product</label>
+            <input id="product" type="text" placeholder="e.g. Reusable water bottle" autocomplete="off" />
+        </div>
+
+        <div class="field">
+            <label for="audience">Target audience</label>
+            <input id="audience" type="text" placeholder="e.g. Remote workers, CTOs, small business owners" autocomplete="off" />
+        </div>
+
+        <div class="grid">
+            <div class="field">
+                <label for="tone">Tone</label>
+                <select id="tone">
+                    <option value="professional">Professional</option>
+                    <option value="friendly">Friendly</option>
+                    <option value="persuasive">Persuasive</option>
+                </select>
+            </div>
+
+            <div class="field">
+                <label for="length">Length</label>
+                <select id="length">
+                    <option value="short">Short</option>
+                    <option value="medium" selected>Medium</option>
+                    <option value="long">Long</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="button-row">
+            <button id="generate-btn" class="primary" onclick="generateEmail()">
+                <span class="btn-label">Generate Email</span>
+                <span class="spinner" aria-hidden="true"></span>
+            </button>
+            <button id="subjects-btn" class="secondary" onclick="generateSubjects()">
+                <span class="btn-label">Brainstorm subject lines</span>
+                <span class="spinner dark" aria-hidden="true"></span>
+            </button>
+        </div>
+    </section>
+
+    <section class="card subjects-card" id="subjects-card" hidden>
+        <div class="result-header">
+            <h2>Subject line ideas</h2>
+            <button class="ghost" onclick="hideSubjects()">Close</button>
+        </div>
+        <ol class="subjects-list" id="subjects-list"></ol>
+    </section>
+
+    <section class="card" id="improver-card">
+        <h2>Already have a draft? Polish it.</h2>
+        <div class="field">
+            <label for="draft">Your draft email</label>
+            <textarea id="draft" rows="6" maxlength="5000" placeholder="Paste your existing draft here — the improver will tighten it, fix tone, and add a clear CTA."></textarea>
+        </div>
+        <div class="grid">
+            <div class="field">
+                <label for="improve-tone">Target tone <span class="optional">(optional)</span></label>
+                <select id="improve-tone">
+                    <option value="">Keep original tone</option>
+                    <option value="professional">Professional</option>
+                    <option value="friendly">Friendly</option>
+                    <option value="persuasive">Persuasive</option>
+                </select>
+            </div>
+            <div class="field align-end">
+                <button class="secondary" id="improve-btn" onclick="improveEmail()">
+                    <span class="btn-label">Improve email</span>
+                    <span class="spinner dark" aria-hidden="true"></span>
+                </button>
+            </div>
+        </div>
+    </section>
+
+    <section class="card followup-card" id="followup-card" hidden>
+        <div class="result-header">
+            <h2>Follow up</h2>
+            <button class="ghost" onclick="hideFollowUp()">Cancel</button>
+        </div>
+        <p class="followup-context" id="followup-context"></p>
+        <div class="grid">
+            <div class="field">
+                <label for="followup-days">Days since original</label>
+                <input id="followup-days" type="number" min="0" max="365" value="5" />
+            </div>
+            <div class="field">
+                <label for="followup-note">Anything new? <span class="optional">(optional)</span></label>
+                <input id="followup-note" type="text" maxlength="500" placeholder="e.g. We just launched a new pricing tier" />
+            </div>
+        </div>
+        <button class="primary" id="followup-btn" onclick="submitFollowUp()">
+            <span class="btn-label">Generate follow-up</span>
+            <span class="spinner" aria-hidden="true"></span>
+        </button>
+    </section>
+
+    <section class="card result-card" id="result-card" hidden>
+        <div class="result-header">
+            <h2>Generated email <span class="editable-hint">— click any section to edit</span></h2>
+            <button class="ghost" id="copy-all-btn" onclick="copyAll()">Copy all</button>
+        </div>
+
+        <div class="send-bar">
+            <div class="field send-to-field">
+                <label for="send-to">Send to</label>
+                <input id="send-to" type="email" placeholder="recipient@example.com" autocomplete="email" />
+            </div>
+            <div class="send-actions">
+                <button class="secondary" onclick="openInGmail()">Open in Gmail</button>
+                <button class="ghost" onclick="openInDefault()">Default email</button>
+                <button class="ghost" id="save-edits-btn" onclick="saveEdits()" hidden>Save edits</button>
+            </div>
+        </div>
+
+        <div class="email-section">
+            <div class="section-head">
+                <span class="label">Subject</span>
+                <button class="copy-btn" data-target="out-subject">Copy</button>
+            </div>
+            <div class="section-body subject editable" id="out-subject" contenteditable="true" spellcheck="true"></div>
+        </div>
+
+        <div class="email-section">
+            <div class="section-head">
+                <span class="label">Body</span>
+                <button class="copy-btn" data-target="out-body">Copy</button>
+            </div>
+            <div class="section-body editable" id="out-body" contenteditable="true" spellcheck="true"></div>
+        </div>
+
+        <div class="email-section">
+            <div class="section-head">
+                <span class="label">Call to action</span>
+                <button class="copy-btn" data-target="out-cta">Copy</button>
+            </div>
+            <div class="section-body editable" id="out-cta" contenteditable="true" spellcheck="true"></div>
+        </div>
+    </section>
+
+    <section class="card error-card" id="error-card" hidden>
+        <div class="error-icon" aria-hidden="true">!</div>
+        <div>
+            <h3>Something went wrong</h3>
+            <p id="error-message"></p>
+        </div>
+    </section>
+
+    <section class="card" id="history-card">
+        <div class="result-header">
+            <h2>Your recent emails</h2>
+            <button class="ghost" onclick="loadHistory()">Refresh</button>
+        </div>
+        <div id="history-list" class="history-list">
+            <p class="history-empty">Loading…</p>
+        </div>
+    </section>
+</main>
+
+<script src="script.js" defer></script>
+
+</body>
+</html>
