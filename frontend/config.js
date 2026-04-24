@@ -21,5 +21,5 @@ function resolveApiBase() {
     if (isLocal) return "http://127.0.0.1:8000";
 
     // 👇 DEPLOYMENT: replace the URL below with your Render backend URL.
-    return "https://CHANGE-ME-TO-YOUR-RENDER-BACKEND.onrender.com";
+    return "https://laksh-ai-sales-email-generator.onrender.com/";
 }
